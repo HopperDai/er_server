@@ -4,6 +4,7 @@ const zlib = require('zlib');
 const assert = require('assert');
 const common = require('./libs/common');
 const path = require('path');
+const db = require('./libs/database');
 
 function fetch(options) {
     return new Promise((resolve, reject) => {
@@ -35,8 +36,10 @@ function fetch(options) {
 }
 
 // 店铺数据
-(async () => {
-    let url = 'https://h5.ele.me/restapi/shopping/v3/restaurants?latitude=23.12908&longitude=113.264359&offset=0&limit=8';
+async function getRestaurants(page = 0) {
+    let limit = 8;
+    let offset = page * limit;
+    let url = `https://h5.ele.me/restapi/shopping/v3/restaurants?latitude=23.12908&longitude=113.264359&offset=${offset}&limit=${limit}`;
 
     let buffer = await fetch(url);
     let json = JSON.parse(buffer.toString());
@@ -75,11 +78,63 @@ function fetch(options) {
 
         let img_buffer = await fetch(img_url); // 不会一次性请求，await 等待
 
-        await common.writeFile(path.resolve(__dirname, './images', data.image_path), img_buffer);
+        await common.writeFile(path.resolve(__dirname, './images/restaurants', data.image_path), img_buffer);
     }
 
     // 图片地址：https://fuss10.elemecdn.com/1/e7/eeea2c0ea40aaf30e154439ac17f9png.png
 
+    for (let i = 0; i < datas.length; i++) {
+        await db.insert('restaurant_table', datas[i]);
+    }
+}
+
+function startClawerRestaurants() {
+    function tick() {
+        for (let i = 0; i < 100; i++) {
+            getRestaurants(i);
+            console.log(`饭店数据：已完成第${i}页`);
+        }
+    }
+    tick();
+
+    // 每隔一小时抓取一次数据
+    setInterval(() => {
+        tick();
+    }, 1 * 3600 * 1000);
+}
+
+async function getMenu(id) {
+    let url = `https://h5.ele.me/restapi/shopping/v2/menu?restaurant_id=${id}`;
+    let buffer = await fetch({
+        url,
+        headers: {
+            'referer': 'https://h5.ele.me/shop/',
+            'x-shard': 'shopid=1103973;loc=113.264359,23.12908'
+        }
+    });
+    let json = JSON.parse(buffer.toString());
+    let datas = json.map(({
+        foods
+    }) => {
+        console.log(foods);
+        return {
+            restaurant_id: foods[0].restaurant_id,
+            item_id: foods[0].item_id,
+            name: foods[0].name,
+            description: foods[0].description,
+            tips: foods[0].tips,
+            image_path: foods[0].image_path
+        }
+    });
+
+    for (let i = 0; i < datas.length; i++) {
+        await db.insert('menu_table', datas[i]);
+    }
+}
+
+(async () => {
+    startClawerRestaurants();
+    // getMenu(156514940)
 })();
 
 
